@@ -161,7 +161,7 @@ function createCargoManifest(workbook: ExcelJS.Workbook, data: FreightFormData) 
     { header: "Currency", key: "currency", width: 12 },
     { header: "Line amount", key: "amount", width: 16, kind: "number" },
   ];
-  const columns = allColumns.filter((column) => items.some((item) => hasValue(item[column.key])));
+  const columns = allColumns.filter((column) => column.key === "currency"\n    ? items.some((item) => hasValue(item.currency)) || hasValue(data.invoiceTotals.currency) || hasValue(data.currency)\n    : items.some((item) => hasValue(item[column.key])));
   if (!columns.length) return;
   const sheet = workbook.addWorksheet("Cargo Manifest", { properties: { tabColor: { argb: COLORS.cyan } } });
   sheet.columns = [{ header: "No.", key: "line", width: 7 }, ...columns];
