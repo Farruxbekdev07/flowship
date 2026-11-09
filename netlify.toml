@@ -1,0 +1,5 @@
+[build]
+  # Use pnpm when available (Netlify CI enables it via Corepack); otherwise
+  # fall back to a pinned pnpm via npx so builds work in any environment.
+  command = "if command -v pnpm >/dev/null 2>&1; then pnpm run build; else npx --yes pnpm@10.30.3 install --frozen-lockfile && npx --yes pnpm@10.30.3 run build; fi"
+  publish = ".next"
