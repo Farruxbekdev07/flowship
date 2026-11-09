@@ -330,7 +330,12 @@ export function LogisticsDashboard() {
     setExporting(true);
     setError(null);
     try {
-      await exportShipmentExcel(formData);
+      await exportShipmentExcel(formData, file ? {
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        lastModified: file.lastModified,
+      } : undefined);
     } catch (exportError) {
       console.error("FreightFlow Excel export failed:", exportError);
       setError(
