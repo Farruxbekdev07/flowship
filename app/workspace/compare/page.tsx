@@ -66,14 +66,27 @@ const normalize = (value: string) =>
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
 
-function compareRow(label: string, values: string[]): ComparisonRow {
+function normalizeEntityName(value: string): string {
+  const parts = value.split(/[\n,]/).map((part) => part.trim()).filter(Boolean);
+  if (parts.length > 1 && /^(ltd|limited|inc|incorporated|llc|gmbh|sarl|spa|s\.?p\.?a\.?)\.?$/i.test(parts[1])) return normalize(parts.slice(0, 2).join(" "));
+  return normalize(parts[0] ?? value);
+}
+
+function normalizeDimensions(value: string): string {
+  const source = value.toLowerCase().replace(/[×*]/g, "x").replace(/,/g, ".");
+  const match = source.match(/(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*(mm|cm|m|in|inch|inches)?/i);
+  if (!match) return normalize(source);
+  const unit = (match[4] ?? "").toLowerCase();
+  const factor = unit === "m" ? 1000 : unit === "cm" ? 10 : unit === "in" || unit === "inch" || unit === "inches" ? 25.4 : 1;
+  const dimensions = match.slice(1, 4).map((part) => Math.round(Number(part) * factor * 1000) / 1000);
+  return dimensions.join("x") + (unit ? "mm" : "");
+}
+
+function compareRow(label: string, values: string[], normalizer = normalize): ComparisonRow {
   const present = values.filter(Boolean);
   if (present.length < 2) return { label, values, result: "incomplete" };
-  return {
-    label,
-    values,
-    result: new Set(present.map(normalize)).size === 1 ? "match" : "mismatch",
-  };
+  const hasMismatch = new Set(present.map(normalizer)).size > 1;
+  return { label, values, result: hasMismatch ? "mismatch" : present.length < values.length ? "incomplete" : "match" };
 }
 
 function descriptionSimilarity(a: string, b: string): number {
@@ -185,23 +198,24 @@ function getCargoGroupStatus(
     (x) => formatNumber(x.packages),
     (x) => formatNumber(x.netKg),
     (x) => formatNumber(x.grossKg),
-    (x) => (x.dimensions ? normalize(x.dimensions) : ""),
+    (x) => (x.dimensions ? normalizeDimensions(x.dimensions) : ""),
     (x) => formatNumber(x.volumeM3),
     (x) =>
       x.unitPrice > 0 ? `${x.currency.toUpperCase()} ${x.unitPrice}` : "",
     (x) => (x.amount > 0 ? `${x.currency.toUpperCase()} ${x.amount}` : ""),
   ];
   let compared = 0;
+  let hasMissingComparableValue = false;
   for (const field of fields) {
-    const values = group.entries
-      .map((entry) => field(entry.item))
-      .filter(Boolean);
-    if (values.length >= 2) {
+    const values = group.entries.map((entry) => field(entry.item));
+    const present = values.filter(Boolean);
+    if (present.length > 0 && present.length < group.entries.length) hasMissingComparableValue = true;
+    if (present.length >= 2) {
       compared += 1;
-      if (new Set(values).size > 1) return "mismatch";
+      if (new Set(present).size > 1) return "mismatch";
     }
   }
-  return compared > 0 && group.entries.length === docCount
+  return compared > 0 && group.entries.length === docCount && !hasMissingComparableValue
     ? "match"
     : "incomplete";
 }
@@ -297,10 +311,12 @@ export default function CompareWorkspacePage() {
       compareRow(
         "Shipper",
         successful.map((d) => d.data.shipperName.trim()),
+        normalizeEntityName,
       ),
       compareRow(
         "Consignee",
         successful.map((d) => d.data.consigneeName.trim()),
+        normalizeEntityName,
       ),
       compareRow(
         "Delivery destination",
