@@ -99,9 +99,10 @@ function compareCargoField(
   const missing = entries.filter(({ item }) => { const raw = item[field]; return !(typeof raw === "number" ? raw > 0 : typeof raw === "string" && raw.trim().length > 0); }).map(({ doc }) => doc.name);
   if (missing.length > 0) addIssue(issues, "info", "document", `${groupLabel}: ${label} is missing from some matched cargo lines`, `Found in ${values.length} of ${entries.length} matched cargo lines. Missing: ${missing.join(", ")}.`, missing, String(field));
   if (values.length < 2) return;
+  const normalizer = field === "dimensions" ? normalizeDimensions : normalize;
   const differs = options.numeric
     ? values.some(({ value }) => Math.abs(Number(value) - Number(values[0].value)) > numericTolerance(Number(value), Number(values[0].value)))
-    : new Set(values.map(({ value }) => normalize(String(value))).filter(Boolean)).size > 1;
+    : new Set(values.map(({ value }) => normalizer(String(value))).filter(Boolean)).size > 1;
   if (differs) {
     const rendered = values.map(({ doc, value }) => `${doc.name}: ${options.numeric ? format(Number(value), options.suffix) : value}`).join(" · ");
     addIssue(issues, options.severity ?? "warning", "cargo", `${groupLabel}: ${label} differs`, rendered,
