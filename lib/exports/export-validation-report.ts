@@ -112,6 +112,14 @@ export async function exportValidationExcel(data: ValidationExportData) {
   styleHeader(comparison, 1, 1, comparison.columnCount);
   data.rows.forEach((row) => comparison.addRow([row.label, ...row.values, row.result.toUpperCase()]));
   styleBody(comparison, 2, comparison.rowCount, comparison.columnCount);
+  for (let row = 2; row <= comparison.rowCount; row += 1) {
+    const resultCell = comparison.getCell(row, comparison.columnCount);
+    const result = String(resultCell.value ?? "").toUpperCase();
+    const fill = result === "MATCH" ? palette.green : result === "MISMATCH" ? palette.red : palette.amber;
+    resultCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fill } };
+    resultCell.font = { bold: true, color: { argb: palette.text } };
+    resultCell.alignment = { vertical: "middle", horizontal: "center" };
+  }
   comparison.views = [{ state: "frozen", ySplit: 1, xSplit: 1 }];
   comparison.autoFilter = { from: { row: 1, column: 1 }, to: { row: Math.max(1, comparison.rowCount), column: comparison.columnCount } };
 
