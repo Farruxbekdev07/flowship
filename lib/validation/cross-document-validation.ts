@@ -26,6 +26,22 @@ export type ValidationReport = {
 
 const normalize = (value: string) => value.toLowerCase().normalize("NFKD")
   .replace(/[\u0300-\u036f]/g, "").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+
+function normalizeEntityName(value: string): string {
+  const parts = value.split(/[\n,]/).map((part) => part.trim()).filter(Boolean);
+  if (parts.length > 1 && /^(ltd|limited|inc|incorporated|llc|gmbh|sarl|spa|s\.?p\.?a\.?)\.?$/i.test(parts[1])) return normalize(parts.slice(0, 2).join(" "));
+  return normalize(parts[0] ?? value);
+}
+
+function normalizeDimensions(value: string): string {
+  const source = value.toLowerCase().replace(/[×*]/g, "x").replace(/,/g, ".");
+  const match = source.match(/(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*(mm|cm|m|in|inch|inches)?/i);
+  if (!match) return normalize(source);
+  const unit = (match[4] ?? "").toLowerCase();
+  const factor = unit === "m" ? 1000 : unit === "cm" ? 10 : unit === "in" || unit === "inch" || unit === "inches" ? 25.4 : 1;
+  const dimensions = match.slice(1, 4).map((part) => Math.round(Number(part) * factor * 1000) / 1000);
+  return dimensions.join("x") + (unit ? "mm" : "");
+}
 const present = (value: string | number | undefined) => value !== undefined && value !== null && String(value).trim() !== "";
 const numericTolerance = (a: number, b: number) => Math.max(0.02, Math.max(Math.abs(a), Math.abs(b)) * 0.01);
 const format = (value: number, suffix = "") => `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 3 }).format(value)}${suffix}`;
@@ -56,16 +72,14 @@ function compareSharedField(
     const value = doc.data[field];
     return typeof value === "string" && value.trim() ? [{ doc, value: value.trim() }] : [];
   });
-  if (values.length < 2) return;
-  const unique = new Set(values.map(({ value }) => normalize(value)));
-  if (unique.size > 1) {
-    addIssue(issues, severity, "shipment", `${label} differs between documents`,
-      values.map(({ doc, value }) => `${doc.name}: ${value}`).join(" · "), values.map(({ doc }) => doc.name), String(field));
-  } else if (values.length < documents.length) {
-    const missing = documents.filter((doc) => !values.some((entry) => entry.doc.id === doc.id)).map((doc) => doc.name);
-    addIssue(issues, "info", "document", `${label} is missing from some documents`,
-      `Found in ${values.length} of ${documents.length} documents. Missing: ${missing.join(", ")}.`, missing, String(field));
+  if (values.length === 0) return;
+  const missing = documents.filter((doc) => !values.some((entry) => entry.doc.id === doc.id)).map((doc) => doc.name);
+  if (values.length >= 2) {
+    const normalizer = field === "shipperName" || field === "consigneeName" ? normalizeEntityName : normalize;
+    const unique = new Set(values.map(({ value }) => normalizer(value)));
+    if (unique.size > 1) addIssue(issues, severity, "shipment", `${label} differs between documents`, values.map(({ doc, value }) => `${doc.name}: ${value}`).join(" · "), values.map(({ doc }) => doc.name), String(field));
   }
+  if (missing.length > 0) addIssue(issues, "info", "document", `${label} is missing from some documents`, `Found in ${values.length} of ${documents.length} documents. Missing: ${missing.join(", ")}.`, missing, String(field));
 }
 
 function compareCargoField(
@@ -81,10 +95,14 @@ function compareCargoField(
     const isKnown = typeof raw === "number" ? raw > 0 : typeof raw === "string" && raw.trim().length > 0;
     return isKnown ? [{ doc, value: raw as string | number }] : [];
   });
+  if (values.length === 0) return;
+  const missing = entries.filter(({ item }) => { const raw = item[field]; return !(typeof raw === "number" ? raw > 0 : typeof raw === "string" && raw.trim().length > 0); }).map(({ doc }) => doc.name);
+  if (missing.length > 0) addIssue(issues, "info", "document", `${groupLabel}: ${label} is missing from some matched cargo lines`, `Found in ${values.length} of ${entries.length} matched cargo lines. Missing: ${missing.join(", ")}.`, missing, String(field));
   if (values.length < 2) return;
+  const normalizer = field === "dimensions" ? normalizeDimensions : normalize;
   const differs = options.numeric
     ? values.some(({ value }) => Math.abs(Number(value) - Number(values[0].value)) > numericTolerance(Number(value), Number(values[0].value)))
-    : new Set(values.map(({ value }) => normalize(String(value))).filter(Boolean)).size > 1;
+    : new Set(values.map(({ value }) => normalizer(String(value))).filter(Boolean)).size > 1;
   if (differs) {
     const rendered = values.map(({ doc, value }) => `${doc.name}: ${options.numeric ? format(Number(value), options.suffix) : value}`).join(" · ");
     addIssue(issues, options.severity ?? "warning", "cargo", `${groupLabel}: ${label} differs`, rendered,
@@ -100,6 +118,11 @@ function compareAggregateMetric(
   issues: ValidationIssue[],
 ) {
   const values = documents.map((doc) => ({ doc, value: metric(doc) })).filter(({ value }) => value > 0);
+  if (values.length === 0) return;
+  if (values.length < documents.length) {
+    const missing = documents.filter((doc) => !values.some((entry) => entry.doc.id === doc.id)).map((doc) => doc.name);
+    addIssue(issues, "info", "document", `Shipment ${label.toLowerCase()} is missing from some documents`, `Found in ${values.length} of ${documents.length} documents. Missing: ${missing.join(", ")}.`, missing, label);
+  }
   if (values.length < 2) return;
   const baseline = values[0].value;
   if (values.some(({ value }) => Math.abs(value - baseline) > numericTolerance(value, baseline))) {
@@ -107,13 +130,7 @@ function compareAggregateMetric(
       values.map(({ doc, value }) => `${doc.name}: ${format(value, suffix)}`).join(" · "),
       values.map(({ doc }) => doc.name), label);
   }
-  if (values.length < documents.length) {
-    const missing = documents.filter((doc) => !values.some((entry) => entry.doc.id === doc.id)).map((doc) => doc.name);
-    addIssue(issues, "info", "document", `Shipment ${label.toLowerCase()} is missing from some documents`,
-      `Found in ${values.length} of ${documents.length} documents. Missing: ${missing.join(", ")}.`, missing, label);
-  }
 }
-
 function validateInvoice(document: ValidationDocument, issues: ValidationIssue[]) {
   const { invoiceTotals: totals, cargoItems } = document.data;
   const hasInvoiceData = totals.totalAmount > 0 || totals.subtotal > 0 || cargoItems.some((item) => item.amount > 0);
@@ -223,6 +240,6 @@ export function validateCrossDocuments(
     issues,
     counts,
     checkedRules,
-    status: counts.error > 0 ? "attention" : counts.warning > 0 ? "review" : "clear",
+    status: counts.error > 0 ? "attention" : counts.warning > 0 || counts.info > 0 ? "review" : "clear",
   };
 }
