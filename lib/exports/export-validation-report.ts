@@ -147,6 +147,44 @@ export async function exportValidationExcel(data: ValidationExportData) {
   cargo.views = [{ state: "frozen", ySplit: 1 }];
   if (cargo.rowCount > 1) cargo.autoFilter = { from: { row: 1, column: 1 }, to: { row: cargo.rowCount, column: cargo.columnCount } };
 
+  const invoice = workbook.addWorksheet("Invoice Totals");
+  invoice.columns = [
+    { header: "Document", key: "document", width: 34 },
+    { header: "Subtotal", key: "subtotal", width: 16 },
+    { header: "Tax", key: "tax", width: 14 },
+    { header: "Freight", key: "freight", width: 14 },
+    { header: "Insurance", key: "insurance", width: 14 },
+    { header: "Other charges", key: "otherCharges", width: 16 },
+    { header: "Total amount", key: "totalAmount", width: 18 },
+    { header: "Currency", key: "currency", width: 12 },
+  ];
+  styleHeader(invoice, 1, 1, invoice.columnCount);
+  data.documents.forEach((doc) => {
+    const totals = doc.data.invoiceTotals;
+    invoice.addRow([doc.name, totals.subtotal || "", totals.tax || "", totals.freight || "", totals.insurance || "", totals.otherCharges || "", totals.totalAmount || "", totals.currency]);
+  });
+  styleBody(invoice, 2, invoice.rowCount, invoice.columnCount);
+  for (let row = 2; row <= invoice.rowCount; row += 1) {
+    for (let column = 2; column <= 7; column += 1) invoice.getCell(row, column).numFmt = "#,##0.00;[Red]-#,##0.00;–";
+  }
+  invoice.views = [{ state: "frozen", ySplit: 1 }];
+  if (invoice.rowCount > 1) invoice.autoFilter = { from: { row: 1, column: 1 }, to: { row: invoice.rowCount, column: invoice.columnCount } };
+
+  const additional = workbook.addWorksheet("Additional Fields");
+  additional.columns = [
+    { header: "Document", key: "document", width: 34 },
+    { header: "Field", key: "field", width: 34 },
+    { header: "Extracted value", key: "value", width: 72 },
+  ];
+  styleHeader(additional, 1, 1, additional.columnCount);
+  data.documents.forEach((doc) => {
+    doc.data.additionalFields.forEach((field) => additional.addRow([doc.name, field.label, field.value]));
+  });
+  if (additional.rowCount === 1) additional.addRow(["—", "No additional fields", "No extra document metadata was extracted."]);
+  styleBody(additional, 2, additional.rowCount, additional.columnCount);
+  additional.views = [{ state: "frozen", ySplit: 1 }];
+  additional.autoFilter = { from: { row: 1, column: 1 }, to: { row: additional.rowCount, column: additional.columnCount } };
+
   const issues = workbook.addWorksheet("Validation Issues");
   issues.columns = [
     { header: "Severity", key: "severity", width: 16 }, { header: "Category", key: "category", width: 16 },
@@ -181,6 +219,11 @@ export function exportValidationPdf(data: ValidationExportData) {
   const popup = window.open("", "_blank", "width=1100,height=800");
   if (!popup) throw new Error("The report window was blocked. Allow pop-ups for this site and try again.");
 
+  const invoiceRows = data.documents.map((doc) => {
+    const totals = doc.data.invoiceTotals;
+    return `<tr><td>${escapeHtml(doc.name)}</td><td>${totals.subtotal || "—"}</td><td>${totals.tax || "—"}</td><td>${totals.freight || "—"}</td><td>${totals.insurance || "—"}</td><td>${totals.otherCharges || "—"}</td><td>${totals.totalAmount || "—"}</td><td>${escapeHtml(totals.currency)}</td></tr>`;
+  }).join("");
+  const additionalRows = data.documents.flatMap((doc) => doc.data.additionalFields.map((field) => `<tr><td>${escapeHtml(doc.name)}</td><td>${escapeHtml(field.label)}</td><td>${escapeHtml(field.value)}</td></tr>`)).join("");
   const issueRows = data.validation.issues.length
     ? data.validation.issues.map((issue) => `<tr><td><span class="pill ${issue.severity}">${severityLabel(issue.severity)}</span></td><td>${escapeHtml(issue.title)}</td><td>${escapeHtml(issue.detail)}</td><td>${escapeHtml(issue.documents.join(", "))}</td></tr>`).join("")
     : `<tr><td colspan="4">No inconsistencies were found in the available extracted data.</td></tr>`;
@@ -196,6 +239,8 @@ export function exportValidationPdf(data: ValidationExportData) {
     <h2>Source documents</h2><table><thead><tr><th>File</th><th>Document type</th><th>AI confidence</th><th>Cargo lines</th></tr></thead><tbody>${documentRows}</tbody></table>
     <h2>Shipment-level comparison</h2><table><thead><tr><th>Field</th>${data.documents.map((doc) => `<th>${escapeHtml(doc.name)}</th>`).join("")}<th>Result</th></tr></thead><tbody>${comparisonRows || `<tr><td colspan="${data.documents.length + 2}">No comparable shipment fields were extracted.</td></tr>`}</tbody></table>
     <h2>Cargo line-item matching</h2><table><thead><tr><th>Group</th><th>Document</th><th>Description</th><th>HS code</th><th>Quantity</th><th>Packages</th><th>Net kg</th><th>Gross kg</th><th>Amount</th></tr></thead><tbody>${cargoRows || `<tr><td colspan="9">No cargo lines extracted.</td></tr>`}</tbody></table>
+    <h2>Invoice totals</h2><table><thead><tr><th>Document</th><th>Subtotal</th><th>Tax</th><th>Freight</th><th>Insurance</th><th>Other charges</th><th>Total</th><th>Currency</th></tr></thead><tbody>${invoiceRows || `<tr><td colspan="8">No invoice totals extracted.</td></tr>`}</tbody></table>
+    <h2>Additional document fields</h2><table><thead><tr><th>Document</th><th>Field</th><th>Extracted value</th></tr></thead><tbody>${additionalRows || `<tr><td colspan="3">No additional document fields extracted.</td></tr>`}</tbody></table>
     <h2>Validation findings</h2><table><thead><tr><th>Severity</th><th>Finding</th><th>Details</th><th>Affected documents</th></tr></thead><tbody>${issueRows}</tbody></table>
     <div class="note">Automated checks use extracted document data and deterministic validation rules. Missing fields are treated as incomplete rather than confirmed errors. Similar cargo descriptions may be incorrectly grouped or left unmatched. Always verify flagged findings against the original documents before operational, customs, or payment decisions.</div>
     <script>window.addEventListener('load',()=>setTimeout(()=>window.print(),350));</script></body></html>`;
