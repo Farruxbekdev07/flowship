@@ -109,7 +109,6 @@ export async function exportValidationExcel(data: ValidationExportData) {
 
   const comparison = workbook.addWorksheet("Document Comparison");
   comparison.columns = [{ header: "Field", key: "field", width: 28 }, ...data.documents.map((doc, index) => ({ header: doc.name, key: `doc${index}`, width: 28 })), { header: "Result", key: "result", width: 18 }];
-  comparison.addRow(["Field", ...data.documents.map((doc) => doc.name), "Result"]);
   styleHeader(comparison, 1, 1, comparison.columnCount);
   data.rows.forEach((row) => comparison.addRow([row.label, ...row.values, row.result.toUpperCase()]));
   styleBody(comparison, 2, comparison.rowCount, comparison.columnCount);
@@ -126,7 +125,6 @@ export async function exportValidationExcel(data: ValidationExportData) {
     { header: "Unit price", key: "price", width: 14 }, { header: "Currency", key: "currency", width: 12 },
     { header: "Amount", key: "amount", width: 16 },
   ];
-  cargo.addRow(["Cargo group", "Document", "Line #", "Description", "HS Code", "Quantity", "Packages", "Net kg", "Gross kg", "Volume m³", "Unit price", "Currency", "Amount"]);
   styleHeader(cargo, 1, 1, cargo.columnCount);
   data.cargoGroups.forEach((group, index) => {
     const label = group.entries.find((entry) => entry.item.description)?.item.description || `Cargo group ${index + 1}`;
@@ -147,7 +145,6 @@ export async function exportValidationExcel(data: ValidationExportData) {
     { header: "Issue", key: "title", width: 48 }, { header: "Details", key: "detail", width: 76 },
     { header: "Affected documents", key: "documents", width: 48 }, { header: "Field", key: "field", width: 24 },
   ];
-  issues.addRow(["Severity", "Category", "Issue", "Details", "Affected documents", "Field"]);
   styleHeader(issues, 1, 1, issues.columnCount);
   data.validation.issues.forEach((issue) => issues.addRow([
     severityLabel(issue.severity), issue.category, issue.title, issue.detail, issue.documents.join("; "), issue.field ?? "",
